@@ -23,6 +23,51 @@ class ReLu(Activation):
     
     def derivative(self, z):
         return (z > 0) * 1
+    
+class Identity(Activation):
+    
+    def forward(self, z):
+        return z
+    
+    def derivative(self, z):
+        return 1
+
+
+class Softmax(Activation):
+    
+    def forward(self, logits):
+        
+        y_hat_shifted = logits - logits.max(axis=1, keepdims=True)
+        s = np.sum(np.exp(y_hat_shifted), axis=1, keepdims=True)
+        return np.exp(y_hat_shifted) / s
+        
+    
+class MSE:
+    
+    def loss_calculation(self, y_hat, y):
+        return np.mean(0.5 * (y_hat - y) **2)
+    
+    def loss_gradient(self, y_hat, y):
+        return (y_hat - y) / y_hat.size
+    
+class CrossEntropy:
+    
+    def loss_calculation(self, logits, y):
+        y_hat_shifted = logits - logits.max(axis=1, keepdims=True)
+        s = np.sum(np.exp(y_hat_shifted), axis=1, keepdims=True)
+        sample_loss = - np.sum(y * (y_hat_shifted - np.log(s)), axis=1)
+        
+        return sample_loss.mean()
+    
+    def loss_gradient(self, logits, y):
+        
+        y_hat_shifted = logits - logits.max(axis=1, keepdims=True)
+        s = np.sum(np.exp(y_hat_shifted), axis=1, keepdims=True)
+        a = np.exp(y_hat_shifted) / s
+        
+        return (a - y) / y.shape[0]
+        
+        
 
 
 class Layer:
@@ -45,7 +90,6 @@ class Layer:
             #self.w = np.random.random((a_prev.shape[1], self.n_hidden))
             self.w = np.random.randn(a_prev.shape[1], self.n_hidden) * np.sqrt(2 / a_prev.shape[1])
             self.b = np.zeros((1, self.n_hidden))
-        
         self.a_prev = a_prev
         self.z = self.a_prev @ self.w + self.b
         self.a = self.activation_function.forward(self.z)
@@ -63,7 +107,6 @@ class Layer:
         self.dL_db = dL_dz.sum(axis=0, keepdims=True)
         # shape (samples, features)
         dL_da_prev = dL_dz @ self.w.T
-        
         return dL_da_prev
     
     def update_weights(self, learn_rate):
@@ -72,58 +115,104 @@ class Layer:
         self.w -=  self.dL_dw * learn_rate 
         
         
-class MSE:
-    
-    def loss_calculation(self, y, y_hat):
-        return np.mean(0.5 * (y_hat - y) **2)
-    
-    def loss_gradient(self, y, y_hat):
-        return (y_hat - y) / y_hat.size
+
 
 
 class NeuralNetwork:
     """
-    Simple neural network with 1 hidden layer of flexible size
+    Simple neural network with n hidden layer of flexible size
     Input: (n_samples, m_features)
-
-
     """
     def __init__(self, 
-                 layers: list[Layer], 
-                 learn_rate = 0.3):
+                 layers: list[Layer],
+                 loss_function):
 
-        self.learn_rate = learn_rate
         self.layers = layers
-        self.loss_function = MSE()
-
-
-    def train(self, X, Y):
+        self.loss_function = loss_function
         
-        for i in range(10000):
-            
-            layer_output = self.layers[0].forward_pass(X)
-            for layer in self.layers[1:]:
-                layer_output = layer.forward_pass(layer_output)
-                
-            loss = self.loss_function.loss_calculation(Y, layer_output)
-            print(f"Epoch {i+1} Loss: {loss.round(4)}") if i % 1000 == 0 else None
-            
-            dL_da = self.loss_function.loss_gradient(Y, layer_output)
-            for layer in self.layers[::-1]:
-                dL_da = layer.backward_pass(dL_da)
-                
-            for layer in self.layers:
-                layer.update_weights(self.learn_rate)
-                
-                
+    def accuracy(self, y_hat, Y):
+        return (y_hat.argmax(axis=1) == Y.argmax(axis=1)).sum() / Y.shape[0]
+        
 
+    def train(self, X, Y, epochs=1, batch_size=100, learn_rate = 0.05, X_val = None, Y_val = None):
+        
+        layer_output = None
+        self.epoch_losses = []
+        self.epoch_losses_val = []
+        self.epoch_accu = []
+        self.epoch_accu_val = []  
+        for i in range(epochs):
+            permutation = np.random.permutation(X.shape[0])
+            loss = 0
+
+            for indices in range(0, X.shape[0], batch_size):
+                batch_indices = permutation[indices:indices+batch_size]
+                X_batch = X[batch_indices]
+                Y_batch = Y[batch_indices]
+                
+                layer_output = self.forward(X_batch)
+                    
+                loss += self.loss(layer_output, Y_batch) * batch_indices.shape[0]
+                
+                self.backward(layer_output, Y_batch)
+                    
+                for layer in self.layers:
+                    layer.update_weights(learn_rate)
+            
+            epoch_loss_batch_avg = loss / permutation.shape[0]
+
+            print(f"Average batch loss in epoch {i}: {epoch_loss_batch_avg.round(4)}") 
+            
+            if X_val is not None and Y_val is not None:
+                layer_output_val = self.forward(X_val)  
+                self.epoch_losses_val.append(self.loss(layer_output_val, Y_val))
+                self.epoch_accu_val.append(self.accuracy(layer_output_val, Y_val))
+                
+                layer_output = self.forward(X)  
+                self.epoch_losses.append(self.loss(layer_output, Y))
+                self.epoch_accu.append(self.accuracy(layer_output, Y))
+
+        return 
+            
+    def forward(self, X) -> np.ndarray:
+        """
+        Forward pass through the network layers.
+        Parameters:
+            X: Input data.
+        Returns:
+            np.ndarray: Network predictions
+        """
+        layer_output = self.layers[0].forward_pass(X)
+        for layer in self.layers[1:]:
+            layer_output = layer.forward_pass(layer_output)
+        return layer_output
+    
+    def backward(self, layer_output, Y):
+            
+        dL_da = self.loss_function.loss_gradient(layer_output, Y)
+        for layer in self.layers[::-1]:
+            dL_da = layer.backward_pass(dL_da)
+            
+    def loss(self, layer_output, Y):
+        return self.loss_function.loss_calculation(layer_output, Y)
+
+def train_val_split(X, Y, train_split):
+    permutation = np.random.permutation(X.shape[0])
+    pivot = round(X.shape[0] * train_split)
+    train_indices = permutation[:pivot]
+    val_indices = permutation[pivot:]
+    
+    return X[train_indices], Y[train_indices], X[val_indices], Y[val_indices]
+    
 
 def main():
 
-    x = np.array([[1, 0, 3],[4,2,2], [0,0,0], [7,0,0], [0,0,5]])
+    x = np.array([[1,55, 3],[4,100,22], [11,33,0], [7,0,0], [0,0,224]])
     y = np.array([[0,1,0,],[0,0,0],[1,1,1], [0,1,1], [1,1,0]])
 
-    nn = NeuralNetwork([Layer(100, ReLu()), Layer(3,Sigmoid())])
-    nn.train(x, Y=y)
+    nn = NeuralNetwork([Layer(3, ReLu()), Layer(3,Sigmoid())], MSE())
+    #nn.train(x, Y=y, epochs=1)
+    print(train_val_split(x, y, 0.7, 0))
 
-main()
+if __name__== "__main__":
+    main()
