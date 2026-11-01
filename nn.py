@@ -32,15 +32,6 @@ class Identity(Activation):
     def derivative(self, z):
         return 1
 
-
-class Softmax(Activation):
-    
-    def forward(self, logits):
-        
-        y_hat_shifted = logits - logits.max(axis=1, keepdims=True)
-        s = np.sum(np.exp(y_hat_shifted), axis=1, keepdims=True)
-        return np.exp(y_hat_shifted) / s
-        
     
 class MSE:
     
@@ -53,6 +44,7 @@ class MSE:
 class CrossEntropy:
     
     def loss_calculation(self, logits, y):
+        
         y_hat_shifted = logits - logits.max(axis=1, keepdims=True)
         s = np.sum(np.exp(y_hat_shifted), axis=1, keepdims=True)
         sample_loss = - np.sum(y * (y_hat_shifted - np.log(s)), axis=1)
@@ -80,14 +72,11 @@ class Layer:
         self.activation_function = activation_function
         self.n_hidden = n_hidden
 
-
-
     def forward_pass(self, a_prev):
         # input shape: (batch, features) / (samples, features)
         # weight shape: (features, hidden)
         # bias shape: (1, hidden)
         if self.w is None:
-            #self.w = np.random.random((a_prev.shape[1], self.n_hidden))
             self.w = np.random.randn(a_prev.shape[1], self.n_hidden) * np.sqrt(2 / a_prev.shape[1])
             self.b = np.zeros((1, self.n_hidden))
         self.a_prev = a_prev
@@ -100,7 +89,6 @@ class Layer:
         
         # dlda shape (samples, nhidden)
         dL_dz = dL_da * self.activation_function.derivative(self.z)
-        
         # shape (features, hidden)
         self.dL_dw = self.a_prev.T @ dL_dz
         # shape (1, hidden)
@@ -114,9 +102,6 @@ class Layer:
         self.b -= self.dL_db * learn_rate
         self.w -=  self.dL_dw * learn_rate 
         
-        
-
-
 
 class NeuralNetwork:
     """
@@ -132,19 +117,22 @@ class NeuralNetwork:
         
     def accuracy(self, y_hat, Y):
         return (y_hat.argmax(axis=1) == Y.argmax(axis=1)).sum() / Y.shape[0]
-        
+    
+    def predict(self, X):
+        return self.forward(X)    
 
-    def train(self, X, Y, epochs=1, batch_size=100, learn_rate = 0.05, X_val = None, Y_val = None):
+    def train(self, X, Y, epochs=1, batch_size=100, learn_rate = 0.05, X_val = None, Y_val = None, print_avg_batch_loss = True):
         
         layer_output = None
+        
         self.epoch_losses = []
         self.epoch_losses_val = []
         self.epoch_accu = []
         self.epoch_accu_val = []  
+        
         for i in range(epochs):
             permutation = np.random.permutation(X.shape[0])
             loss = 0
-
             for indices in range(0, X.shape[0], batch_size):
                 batch_indices = permutation[indices:indices+batch_size]
                 X_batch = X[batch_indices]
@@ -160,8 +148,9 @@ class NeuralNetwork:
                     layer.update_weights(learn_rate)
             
             epoch_loss_batch_avg = loss / permutation.shape[0]
-
-            print(f"Average batch loss in epoch {i}: {epoch_loss_batch_avg.round(4)}") 
+            
+            if print_avg_batch_loss:
+                print(f"Average batch loss in epoch {i}: {epoch_loss_batch_avg.round(4)}") 
             
             if X_val is not None and Y_val is not None:
                 layer_output_val = self.forward(X_val)  
@@ -205,14 +194,5 @@ def train_val_split(X, Y, train_split):
     return X[train_indices], Y[train_indices], X[val_indices], Y[val_indices]
     
 
-def main():
-
-    x = np.array([[1,55, 3],[4,100,22], [11,33,0], [7,0,0], [0,0,224]])
-    y = np.array([[0,1,0,],[0,0,0],[1,1,1], [0,1,1], [1,1,0]])
-
-    nn = NeuralNetwork([Layer(3, ReLu()), Layer(3,Sigmoid())], MSE())
-    #nn.train(x, Y=y, epochs=1)
-    print(train_val_split(x, y, 0.7, 0))
-
 if __name__== "__main__":
-    main()
+    pass
